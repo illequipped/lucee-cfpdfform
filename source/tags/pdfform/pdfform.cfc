@@ -116,8 +116,29 @@ component {
             local.pdfForm = local.pdf.getDocumentCatalog().getAcroForm();
             
             if (structKeyExists(arguments, "font") && arguments.font != "") {
-                local.pdfFont = PDType0Font.load(local.pdf, createObject("java", "java.io.FileInputStream").init(ARGUMENTS.font), false);
-                local.fontName = local.pdfForm.getDefaultResources().add(local.pdfFont).getName();
+				// Resolve font path (support absolute and relative paths)
+				local.fontPath = isAbsolutePath(arguments.font) ? arguments.font : getDirectoryFromPath(cgi.cf_template_path) & arguments.font;
+				
+				// Load the font using the PdfBox PDType0Font helper
+				local.fontStream = createObject("java", "java.io.FileInputStream").init(local.fontPath);
+				try {
+					local.pdfFont = VARIABLES.pdtype0font.load(
+						local.pdf,
+						local.fontStream,
+						false // embed full font (required for extended character sets)
+					);
+				} finally {
+					local.fontStream.close();
+				}
+
+				// Ensure default resources exist before adding the font
+				local.resources = local.pdfForm.getDefaultResources();
+				if (isNull(local.resources)) {
+					local.resources = createObject("java", "org.apache.pdfbox.pdmodel.PDResources").init();
+					local.pdfForm.setDefaultResources(local.resources);
+				}
+
+				local.fontName = local.resources.add(local.pdfFont).getName();
             }
 
             // For populating with fdfdata
@@ -169,7 +190,8 @@ component {
             while (local.stFields.hasNext()) {
                 var fieldName = local.stFields.next();
                 if (StructKeyExists(ARGUMENTS.stFormFields, fieldName.getPartialName())) {
-                    if (structKeyExists(arguments, "font") && arguments.font != "") {
+                    // Only set font appearance on text fields (not checkboxes, radio buttons, etc.)
+                    if (structKeyExists(local, "fontName") && isInstanceOf(fieldName, "org.apache.pdfbox.pdmodel.interactive.form.PDTextField")) {
                         fieldName.setDefaultAppearance("/" & local.fontName & " " & ARGUMENTS.fontsize & " Tf 0 g");
                     }
                     fieldName.setValue(ARGUMENTS.stFormFields[fieldName.getPartialName()]);
